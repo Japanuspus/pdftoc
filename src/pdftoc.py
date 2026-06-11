@@ -72,31 +72,34 @@ class TocConfig(NamedTuple):
     parser_regex: str
 
 
-DEFAULT_PARSER_REGEX = r"^(\s*)(?P<page_number>-?\d+)(?P<indented_title>.+)$"
+DEFAULT_TOC_CONFIG = TocConfig(
+    offset=0,
+    indent_size=2,
+    parser_regex=r"^(\s*)(?P<page_number>-?\d+)(?P<indent>\s+)(?P<title>.+)$"
+)
+
+
+# https://docs.python.org/3/library/itertools.html#itertools.tee example of lookahead with tee to peek at the next line without consuming it
+def lookahead(tee_iterator):
+     "Return the next value without moving the input forward"
+     [forked_iterator] = itertools.tee(tee_iterator, 1)
+     return next(forked_iterator)
 
 
 def parse_toc_header(lines: typing.Iterator[str]) -> TocConfig:
     """Parse TOML header and return config"""
 
-    if next(lines,"").strip() != "---":
-        raise ValueError("TOML header must start with '---' on the first line.")
-    header_text = '\n'.join(itertools.takewhile(lambda line: line.strip() != "---", lines))
-    data = tomllib.loads(header_text) if header_text.strip() else {}
+    if not lookahead(lines).startswith("---"):
+        return DEFAULT_TOC_CONFIG
+    _ = next(lines)  # Consume the '---' line
+    header_text = '\n'.join(itertools.takewhile(lambda line: not line.startswith("---"), lines))
+    data = tomllib.loads(header_text) 
     return TocConfig(
-        offset=int(data.get("offset", 0)),
-        indent_size=int(data.get("indent_size", 2)),
-        parser_regex=str(data.get("parser_regex", DEFAULT_PARSER_REGEX))
+        *(data.get(k, default) for k, default in DEFAULT_TOC_CONFIG._asdict().items())
     )
 
 
-def parse_toc_file(lines: TextIO) -> list[TocEntry]:
-    """Parse the table of contents file and return a list of entries.
-
-    Each entry is a tuple of (pdf_page_number, header_level, title).
-    Header level is determined by spacing between page number and title when
-    the regex defines a `spacing` group, otherwise by leading indentation.
-    """
-    config = parse_toc_header(lines)
+def parse_toc_entries(lines: typing.Iterator[str], config: TocConfig) -> list[TocEntry]:
     entries: list[TocEntry] = []
     min_spacing = None  # Baseline for spacing-derived levels
     line_pattern = re.compile(config.parser_regex)
@@ -112,16 +115,15 @@ def parse_toc_file(lines: TextIO) -> list[TocEntry]:
         groups = m.groupdict()
         try:
             page_number = int(groups["page_number"])
-            indented_title = groups["indented_title"]
+            title = groups["title"].strip()
+            indent = groups["indent"]
         except KeyError:
-            raise ValueError(f"Missing group 'page_number' or 'indented_title' in parser_regex: {config.parser_regex} for line: {line}")
+            raise ValueError(f"Missing group 'page_number', 'indent', or 'title' in parser_regex: {config.parser_regex} for line: {line}")
         
-        title = indented_title.strip()
-        spacing = len(indented_title) - len(indented_title.lstrip(' '))
-
+        # Convert indent to header level based on minimum spacing
+        spacing = len(indent)        
         if min_spacing is None:
             min_spacing = spacing
-
         indent_spacing = spacing - min_spacing
         if indent_spacing < 0 or indent_spacing % config.indent_size != 0:
             raise ValueError(f"Invalid spacing for header level in line: {line}")
@@ -133,6 +135,19 @@ def parse_toc_file(lines: TextIO) -> list[TocEntry]:
     
     entries.sort()  # Ensure entries are sorted by page number
     return entries
+
+
+def parse_toc_file(lines: typing.TextIO) -> list[TocEntry]:
+    """Parse the table of contents file and return a list of entries.
+
+    Each entry is a tuple of (pdf_page_number, header_level, title).
+    Header level is determined by spacing between page number and title when
+    the regex defines a `spacing` group, otherwise by leading indentation.
+    """
+    [lines] = itertools.tee(lines, 1) #make lines forkable for lookahead
+    config = parse_toc_header(lines)
+    print(f"Parsed TOC config: {config}")
+    return parse_toc_entries(lines, config)
 
 
 def add_pdf_toc(
@@ -182,6 +197,7 @@ def add_pdf_toc(
     # Write output PDF with TOC
     writer.write(output_file)
     print(f"TOC added successfully. Output saved to: {output_file}")
+
 
 def main(argv: list[str]):
     parser = argparse.ArgumentParser(

@@ -9,8 +9,8 @@ def toc_text():
         ---
         offset=21
         indent_size=4
-        # parser_regex="^(?P<indent>\\s*)(?P<title>.*)\\s*\\. (?P<page_number>\\d+)$"
-        parser_regex="^(?P<indented_title>.*)\\s*\\. (?P<page_number>\\d+)$"
+        parser_regex="^(?P<indent>\\s*)(?P<title>.*)\\s*\\. (?P<page_number>\\d+)$"
+        #parser_regex="^(?P<indented_title>.*)\\s*\\. (?P<page_number>\\d+)$"
         ---
         Introduction . 1
         I TRANSITION AMPLITUDES IN ELECTRODYNAMICS Introduction . 5
