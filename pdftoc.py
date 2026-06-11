@@ -5,7 +5,7 @@
 # ]
 # ///
 
-"""Add table of contents entries to PDF document
+r"""Add table of contents entries to PDF document
 
 The table of contents file should be a text file with one entry per line, formatted as follows:
 ```
@@ -19,22 +19,43 @@ All subsequent entries must have spacing x which is an even number above x0, i.e
 
 Example:
 ```
-Offset: 4
+---
+offset=4
+---
   1   1 Introduction
  10   2 Background
  13     2.1 Previous Work
  15     2.2 Our Approach
  18   3 Conclusion
  ```
+
+
+ Example:
+```
+---
+offset=5
+indent_size=4
+parser_regex="^(?P<indented_title>.*)\s+\. (?P<page_number>\d+)$"
+---
+1 Introduction . 1
+2 Background . 10   
+    2.1 Previous Work . 13   
+    2.2 Our Approach . 15   
+3 Conclusion . 18   
+ ```
+
 """
 
 from __future__ import annotations
 
 import argparse
+import itertools
 from pathlib import Path
 import re
 import sys
+import tomllib
 from typing import NamedTuple
+import typing
 
 import pypdf
 
@@ -45,43 +66,71 @@ class TocEntry(NamedTuple):
     title: str
 
 
+class TocConfig(NamedTuple):
+    offset: int
+    indent_size: int
+    parser_regex: str
+
+
+DEFAULT_PARSER_REGEX = r"^(\s*)(?P<page_number>-?\d+)(?P<indented_title>.+)$"
+
+
+def parse_toc_header(lines: typing.Iterator[str]) -> TocConfig:
+    """Parse TOML header and return config"""
+
+    if next(lines,"").strip() != "---":
+        raise ValueError("TOML header must start with '---' on the first line.")
+    header_text = '\n'.join(itertools.takewhile(lambda line: line.strip() != "---", lines))
+    data = tomllib.loads(header_text) if header_text.strip() else {}
+    return TocConfig(
+        offset=int(data.get("offset", 0)),
+        indent_size=int(data.get("indent_size", 2)),
+        parser_regex=str(data.get("parser_regex", DEFAULT_PARSER_REGEX))
+    )
+
+
 def parse_toc_file(toc_file: Path) -> list[TocEntry]:
     """Parse the table of contents file and return a list of entries.
 
     Each entry is a tuple of (pdf_page_number, header_level, title).
-    Header level is determined by the spacing between page number and title.
+    Header level is determined by spacing between page number and title when
+    the regex defines a `spacing` group, otherwise by leading indentation.
     """
+    lines = toc_file.open(encoding="utf-8")
+    config = parse_toc_header(lines)
     entries: list[TocEntry] = []
-    offset = 0
-    min_spacing = None  # Minimum spacing, used as reference for header levels
-    
-    line_pattern = re.compile(r"^(\s*)(-?\d+)(\s+)(.*)$")
+    min_spacing = None  # Baseline for spacing-derived levels
+    line_pattern = re.compile(config.parser_regex)
 
-    with toc_file.open("r", encoding="utf-8") as f:
-        line = next(f)  # Read the first line for offset
-        if not line.startswith("Offset:"):
-            raise ValueError("First line of TOC file must start with 'Offset:'")
-        offset = int(line.split(":")[1].strip())
+    for line in (l.rstrip() for l in lines):
+        if not line:  # Skip empty lines
+            continue
 
-        for line in (l for l in (l.strip() for l in f) if l):  # Skip empty lines
-            m=line_pattern.match(line)
-            if not m:
-                raise ValueError(f"Malformed line in TOC file: {line}")
-            
-            page_number = int(m.group(2))
+        m = line_pattern.match(line)
+        if not m:
+            raise ValueError(f"Malformed line in TOC file: \"{line}\" does not match parser_regex: r'{config.parser_regex}'")
 
-            # Count spaces between page number and title
-            spacing = len(m.group(3))
-            # Set minimum spacing from first entry
-            if min_spacing is None:
-                min_spacing = spacing
-            header_level = (spacing - min_spacing) // 2
-            if not (spacing - min_spacing) % 2 == 0:
-                raise ValueError(f"Invalid spacing for header level in line: {line}")
+        groups = m.groupdict()
+        try:
+            page_number = int(groups["page_number"])
+            indented_title = groups["indented_title"]
+        except KeyError:
+            raise ValueError(f"Missing group 'page_number' or 'indented_title' in parser_regex: {config.parser_regex} for line: {line}")
+        
+        title = indented_title.lstrip(' ')
+        spacing = len(indented_title) - len(title)
 
-            title = m.group(4)
-            pdf_page_number = page_number + offset
-            entries.append(TocEntry(pdf_page_number, header_level, title))
+        if min_spacing is None:
+            min_spacing = spacing
+
+        indent_spacing = spacing - min_spacing
+        if indent_spacing < 0 or indent_spacing % config.indent_size != 0:
+            raise ValueError(f"Invalid spacing for header level in line: {line}")
+        header_level = indent_spacing // config.indent_size
+ 
+        pdf_page_number = page_number + config.offset
+        entry = TocEntry(pdf_page_number, header_level, title)
+        entries.append(entry)
     
     entries.sort()  # Ensure entries are sorted by page number
     return entries
