@@ -54,7 +54,7 @@ from pathlib import Path
 import re
 import sys
 import tomllib
-from typing import NamedTuple
+from typing import NamedTuple, TextIO
 import typing
 
 import pypdf
@@ -89,14 +89,13 @@ def parse_toc_header(lines: typing.Iterator[str]) -> TocConfig:
     )
 
 
-def parse_toc_file(toc_file: Path) -> list[TocEntry]:
+def parse_toc_file(lines: TextIO) -> list[TocEntry]:
     """Parse the table of contents file and return a list of entries.
 
     Each entry is a tuple of (pdf_page_number, header_level, title).
     Header level is determined by spacing between page number and title when
     the regex defines a `spacing` group, otherwise by leading indentation.
     """
-    lines = toc_file.open(encoding="utf-8")
     config = parse_toc_header(lines)
     entries: list[TocEntry] = []
     min_spacing = None  # Baseline for spacing-derived levels
@@ -117,8 +116,8 @@ def parse_toc_file(toc_file: Path) -> list[TocEntry]:
         except KeyError:
             raise ValueError(f"Missing group 'page_number' or 'indented_title' in parser_regex: {config.parser_regex} for line: {line}")
         
-        title = indented_title.lstrip(' ')
-        spacing = len(indented_title) - len(title)
+        title = indented_title.strip()
+        spacing = len(indented_title) - len(indented_title.lstrip(' '))
 
         if min_spacing is None:
             min_spacing = spacing
@@ -184,8 +183,7 @@ def add_pdf_toc(
     writer.write(output_file)
     print(f"TOC added successfully. Output saved to: {output_file}")
 
-def main(argv: list[str] | None = None) -> int:
-
+def main(argv: list[str]):
     parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -218,15 +216,11 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     
     # Parse TOC file and add to PDF
-    try:
-        toc_entries = parse_toc_file(toc_file)
-        add_pdf_toc(pdf_path, toc_entries, output_file)
-        print(f"Successfully created PDF with TOC: {output_file}")
-        return 0
-    except Exception as e:
-        print(f"Error processing PDF: {e}", file=sys.stderr)
-        return 1
+    with toc_file.open(encoding="utf-8") as f:
+        toc_entries = parse_toc_file(f)
+    add_pdf_toc(pdf_path, toc_entries, output_file)
+    print(f"Successfully created PDF with TOC: {output_file}")
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main(sys.argv[1:])
