@@ -1,0 +1,2 @@
+- use logging instead of print
+- get LLM to remove the annoying int return pattern. Use exceptions for error return path all the way to main.
