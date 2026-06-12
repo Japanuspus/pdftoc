@@ -62,6 +62,7 @@ from __future__ import annotations
 
 import argparse
 import itertools
+import logging
 from pathlib import Path
 import re
 import sys
@@ -71,6 +72,8 @@ import typing
 
 import pypdf
 from pypdf.generic import Destination
+
+logger = logging.getLogger(__name__)
 
 
 class TocEntry(NamedTuple):
@@ -165,7 +168,7 @@ def parse_toc_file(lines: typing.Iterable[str]) -> list[TocEntry]:
     """
     [lines] = itertools.tee(lines, 1)  # make lines forkable for lookahead
     config = parse_toc_header(lines)
-    print(f"Parsed TOC config: {config}")
+    logger.debug(f"Parsed TOC config: {config}")
     return parse_toc_entries(lines, config)
 
 
@@ -183,7 +186,7 @@ def add_pdf_toc(
         output_file: Path to save the output PDF with TOC.
     """
 
-    print(f"Adding TOC to PDF: {pdf_file}")
+    logger.info(f"Adding TOC to PDF: {pdf_file}")
     writer = pypdf.PdfWriter(clone_from=pdf_file)
     writer.page_mode = "/UseOutlines"
 
@@ -193,7 +196,7 @@ def add_pdf_toc(
     # Track outline items at each level to set correct parent relationships
     outline_stack = {}
 
-    print(f"Processing {len(toc_entries)} TOC entries:")
+    logger.debug(f"Processing {len(toc_entries)} TOC entries:")
     for pdf_page_number, header_level, title in toc_entries:
         # Adjust for 0-based indexing in pypdf
         page_idx = pdf_page_number - 1
@@ -205,13 +208,13 @@ def add_pdf_toc(
         parent = outline_stack.get(header_level - 1, None)
         if parent:
             outline_item = writer.add_outline_item(title, page_idx, parent=parent)
-            print(
-                f"  Added TOC entry page index {page_idx:4d}, level {header_level:02d} with parent:    '{title}'"
+            logger.debug(
+                f"Added TOC entry page index {page_idx:4d}, level {header_level:02d} with parent: '{title}'"
             )
         else:
             outline_item = writer.add_outline_item(title, page_idx)
-            print(
-                f"  Added TOC entry page index {page_idx:4d}, level {header_level:02d} without parent: '{title}'"
+            logger.debug(
+                f"Added TOC entry page index {page_idx:4d}, level {header_level:02d} without parent: '{title}'"
             )
 
         # Store this item as potential parent for deeper levels
@@ -230,7 +233,7 @@ def run_write_command(args: argparse.Namespace) -> int:
     pdf_path = Path(args.pdf_file)
 
     if not pdf_path.exists():
-        print(f"Error: PDF file not found: {args.pdf_file}", file=sys.stderr)
+        logger.error(f"PDF file not found: {args.pdf_file}")
         return 1
 
     output_file_path = (
@@ -244,7 +247,7 @@ def run_write_command(args: argparse.Namespace) -> int:
         add_pdf_toc(
             pdf_file, toc_entries, output_file, remove_existing=not args.retain_existing
         )
-    print(f"Successfully created PDF with TOC: {output_file_path}")
+    logger.info(f"Successfully created PDF with TOC: {output_file_path}")
     return 0
 
 
@@ -280,6 +283,14 @@ def run_read_command(args: argparse.Namespace) -> int:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="Increase verbosity level (can be repeated: -vv for extra verbose)",
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -332,6 +343,18 @@ def main(argv: list[str]) -> int:
     read_parser.set_defaults(handler=run_read_command)
 
     args = parser.parse_args(argv)
+
+    # Configure logging based on verbosity
+    log_level = logging.WARNING
+    if args.verbose == 1:
+        log_level = logging.INFO
+    elif args.verbose >= 2:
+        log_level = logging.DEBUG
+    logging.basicConfig(
+        level=log_level,
+        format="%(levelname)s: %(message)s",
+    )
+
     return args.handler(args)
 
 
