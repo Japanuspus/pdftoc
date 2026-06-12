@@ -188,7 +188,7 @@ def add_pdf_toc(
     writer.page_mode = "/UseOutlines"
 
     if remove_existing:
-        pass  # TODO implement this
+        writer.get_outline_root().empty_tree()
 
     # Track outline items at each level to set correct parent relationships
     outline_stack = {}
