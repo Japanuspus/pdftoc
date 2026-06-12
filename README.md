@@ -5,11 +5,11 @@ The precise format of the text file can be customized and pdftoc can also read o
 
 ``` bash
 cat some-book-toc.txt
-> ---
-> Offset: 5
-> ---
->  3 1 Introduction
->  7   1.1 Why this book
+> 1 Introduction . 6
+> 2 Background . 10
+>     2.1 Previous Work . 13
+>     2.2 Our Approach . 15
+> 3 Conclusion . 18
 pdftoc add some-book.pdf
 ```
 

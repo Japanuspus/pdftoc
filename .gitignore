@@ -52,3 +52,9 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+
+# Editors
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
