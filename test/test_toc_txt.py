@@ -1,5 +1,4 @@
 import pdftoc
-import textwrap
 import io
 import pytest
 
@@ -11,6 +10,7 @@ SAMPLE_TOC_TEXT_1 = r"""
     2.2 Our Approach . 15
 3 Conclusion . 18
 """.lstrip("\n")
+
 
 SAMPLE_TOC_TEXT_2 = r"""
 ---
@@ -24,26 +24,6 @@ parser_regex="^\\s*(?P<page_number>\\d+)(?P<indent>\\s+)(?P<title>.*)$"
  10     2.2 Our Approach
  13   3 Conclusion
 """.lstrip("\n")
-
-
-@pytest.fixture
-def toc_text():
-    toc_text = textwrap.dedent(
-        r"""
-        ---
-        offset=21
-        indent_size=4
-        parser_regex="^(?P<indent>\\s*)(?P<title>.*)\\s*\\. (?P<page_number>\\d+)$"
-        #parser_regex="^(?P<indented_title>.*)\\s*\\. (?P<page_number>\\d+)$"
-        ---
-        Introduction . 1
-        I TRANSITION AMPLITUDES IN ELECTRODYNAMICS Introduction . 5
-            A. Probability Amplitude Associated with a Physical Process . 7
-            B. Time Dependence of Transition Amplitudes. 9
-                1. Coupling between Discrete Isolated States . 9
-        """[1:]
-    )
-    return io.StringIO(toc_text)
 
 
 def test_toc_text():
@@ -63,3 +43,4 @@ def test_parse_toc_file(sample):
     ]
     entries = pdftoc.parse_toc_file(toc_text)
     assert entries == expected_entries, f"Expected {expected_entries}, got {entries}"
+
