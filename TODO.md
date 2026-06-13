@@ -1,4 +1,4 @@
 - [x] use logging instead of print. Add verbosity level as main parser arg.
 - [x] add tests for read and write functionality, based on in-memory file objects. Write test should verify that existing entries are removed if requested.
-- [ ] remove the int return pattern. Use exceptions for error return path all the way to main
-- [ ] move subparser population to functions that add handler as anonymous function
+- [x] move subparser population to functions that add handler as anonymous function
+- [x] remove the int return pattern. Use exceptions for error return path all the way to main

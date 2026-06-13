@@ -76,6 +76,10 @@ from pypdf.generic import Destination
 logger = logging.getLogger(__name__)
 
 
+class CliError(Exception):
+    """Raised for expected CLI failures that should exit with code 1."""
+
+
 class TocEntry(NamedTuple):
     pdf_page_number: int
     header_level: int
@@ -229,28 +233,6 @@ def add_pdf_toc(
     writer.write(output_file)
 
 
-def run_write_command(args: argparse.Namespace) -> int:
-    pdf_path = Path(args.pdf_file)
-
-    if not pdf_path.exists():
-        logger.error(f"PDF file not found: {args.pdf_file}")
-        return 1
-
-    output_file_path = (
-        pdf_path.with_stem(pdf_path.stem + "-toc")
-        if args.output_file is None
-        else Path(args.output_file)
-    )
-
-    toc_entries = parse_toc_file(args.toc_file) if args.toc_file else []
-    with output_file_path.open("wb") as output_file, pdf_path.open("rb") as pdf_file:
-        add_pdf_toc(
-            pdf_file, toc_entries, output_file, remove_existing=not args.retain_existing
-        )
-    logger.info(f"Successfully created PDF with TOC: {output_file_path}")
-    return 0
-
-
 def _read_toc(
     pdf_reader: pypdf.PdfReader,
     outlines: list[Destination | list],
@@ -273,27 +255,32 @@ def _read_toc(
             print(f"{indent} {item.title} . {page_number + 1}", file=out)
 
 
-def run_read_command(args: argparse.Namespace) -> int:
-    pdf_reader = pypdf.PdfReader(args.pdf_file)
-    outlines = pdf_reader.outline
-    _read_toc(pdf_reader, outlines, args.output_file)
-    return 0
+def read_toc(pdf_reader: pypdf.PdfReader, out: typing.TextIO) -> None:
+    _read_toc(pdf_reader, pdf_reader.outline, out)
 
 
-def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
+def add_write_subparser(subparsers: argparse._SubParsersAction) -> None:
+    def handle_write(args: argparse.Namespace) -> None:
+        pdf_path = Path(args.pdf_file)
 
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        action="count",
-        default=0,
-        help="Increase verbosity level (can be repeated: -vv for extra verbose)",
-    )
+        if not pdf_path.exists():
+            raise CliError(f"PDF file not found: {args.pdf_file}")
 
-    subparsers = parser.add_subparsers(dest="command", required=True)
+        output_file_path = (
+            pdf_path.with_stem(pdf_path.stem + "-toc")
+            if args.output_file is None
+            else Path(args.output_file)
+        )
+
+        toc_entries = parse_toc_file(args.toc_file) if args.toc_file else []
+        with output_file_path.open("wb") as output_file, pdf_path.open("rb") as pdf_file:
+            add_pdf_toc(
+                pdf_file,
+                toc_entries,
+                output_file,
+                remove_existing=not args.retain_existing,
+            )
+        logger.info(f"Successfully created PDF with TOC: {output_file_path}")
 
     write_parser = subparsers.add_parser(
         "write",
@@ -321,7 +308,13 @@ def main(argv: list[str]) -> int:
         help="Retain existing outline items in the PDF instead of removing them.",
     )
     write_parser.add_argument("pdf_file", help="Path to the PDF file to update.")
-    write_parser.set_defaults(handler=run_write_command)
+    write_parser.set_defaults(handler=lambda args: handle_write(args))
+
+
+def add_read_subparser(subparsers: argparse._SubParsersAction) -> None:
+    def handle_read(args: argparse.Namespace) -> None:
+        pdf_reader = pypdf.PdfReader(args.pdf_file)
+        read_toc(pdf_reader, args.output_file)
 
     read_parser = subparsers.add_parser(
         "read",
@@ -340,7 +333,27 @@ def main(argv: list[str]) -> int:
         default="-",
         help="Path to save the output toc file. Use - for stdout. Defaults to stdout.",
     )
-    read_parser.set_defaults(handler=run_read_command)
+    read_parser.set_defaults(handler=lambda args: handle_read(args))
+
+
+
+
+def main(argv: list[str]) -> None:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="Increase verbosity level (can be repeated: -vv for extra verbose)",
+    )
+
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    add_write_subparser(subparsers)
+    add_read_subparser(subparsers)
 
     args = parser.parse_args(argv)
 
@@ -355,8 +368,12 @@ def main(argv: list[str]) -> int:
         format="%(levelname)s: %(message)s",
     )
 
-    return args.handler(args)
+    try:
+        args.handler(args)
+    except CliError as exc:
+        logger.error(str(exc))
+        raise SystemExit(1) from exc
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1:]))
+    main(sys.argv[1:])
