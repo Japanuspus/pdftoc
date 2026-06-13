@@ -10,10 +10,18 @@ cat some-book-toc.txt
 >     2.1 Previous Work . 13
 >     2.2 Our Approach . 15
 > 3 Conclusion . 18
-pdftoc add some-book.pdf
+pdftoc write some-book.pdf --toc-file some-book-toc.txt
 ```
 
-See `pdftoc help` for details on functionality.
+Use the TOC file directly or via stdin:
+
+``` bash
+pdftoc write some-book.pdf --toc-file some-book-toc.txt
+cat some-book-toc.txt | pdftoc write some-book.pdf --toc-file -
+pdftoc read some-book.pdf --output -
+```
+
+See `pdftoc --help` for details on functionality.
 
 ## Install
 

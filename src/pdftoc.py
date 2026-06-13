@@ -1,6 +1,7 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # dependencies = [
+#   "cyclopts",
 #   "pypdf",
 # ]
 # ///
@@ -60,16 +61,19 @@ parser_regex="^\\s*(?P<page_number>\\d+)(?P<indent>\\s+)(?P<title>.*)$"
 
 from __future__ import annotations
 
-import argparse
 import itertools
 import logging
 from pathlib import Path
 import re
 import sys
 import tomllib
+from typing import Annotated
 from typing import NamedTuple
 import typing
 
+import cyclopts
+from cyclopts.types import ExistingPath
+from cyclopts.types import StdioPath
 import pypdf
 from pypdf.generic import Destination
 
@@ -247,7 +251,7 @@ def _read_toc(
             continue
 
         page_number = pdf_reader.get_destination_page_number(item)
-        indent = "  " * level
+        indent = "    " * level
 
         if page_number is None:
             print(f"{indent} {item.title}", file=out)
@@ -259,117 +263,145 @@ def read_toc(pdf_reader: pypdf.PdfReader, out: typing.TextIO) -> None:
     _read_toc(pdf_reader, pdf_reader.outline, out)
 
 
-def add_write_subparser(subparsers: argparse._SubParsersAction) -> None:
-    def handle_write(args: argparse.Namespace) -> None:
-        pdf_path = Path(args.pdf_file)
-
-        if not pdf_path.exists():
-            raise CliError(f"PDF file not found: {args.pdf_file}")
-
-        output_file_path = (
-            pdf_path.with_stem(pdf_path.stem + "-toc")
-            if args.output_file is None
-            else Path(args.output_file)
-        )
-
-        toc_entries = parse_toc_file(args.toc_file) if args.toc_file else []
-        with output_file_path.open("wb") as output_file, pdf_path.open("rb") as pdf_file:
-            add_pdf_toc(
-                pdf_file,
-                toc_entries,
-                output_file,
-                remove_existing=not args.retain_existing,
-            )
-        logger.info(f"Successfully created PDF with TOC: {output_file_path}")
-
-    write_parser = subparsers.add_parser(
-        "write",
-        help="Write a table of contents from a text file into a PDF",
-    )
-    write_parser.add_argument(
-        "-t",
-        "--toc-file",
-        dest="toc_file",
-        type=argparse.FileType("r", encoding="utf-8"),
-        default=None,
-        help="Path for file with toc. Use - for stdin.",
-    )
-    write_parser.add_argument(
-        "-o",
-        "--output",
-        dest="output_file",
-        default=None,
-        help="Path to save the output PDF file. Defaults to <name>-toc.pdf",
-    )
-    write_parser.add_argument(
-        "--retain-existing",
-        action="store_true",
-        default=False,
-        help="Retain existing outline items in the PDF instead of removing them.",
-    )
-    write_parser.add_argument("pdf_file", help="Path to the PDF file to update.")
-    write_parser.set_defaults(handler=lambda args: handle_write(args))
-
-
-def add_read_subparser(subparsers: argparse._SubParsersAction) -> None:
-    def handle_read(args: argparse.Namespace) -> None:
-        pdf_reader = pypdf.PdfReader(args.pdf_file)
-        read_toc(pdf_reader, args.output_file)
-
-    read_parser = subparsers.add_parser(
-        "read",
-        help="Read and print an existing PDF outline",
-    )
-    read_parser.add_argument(
-        "pdf_file",
-        type=argparse.FileType("rb"),
-        help="Path to the PDF file to inspect.",
-    )
-    read_parser.add_argument(
-        "-o",
-        "--output",
-        dest="output_file",
-        type=argparse.FileType("w", encoding="utf-8"),
-        default="-",
-        help="Path to save the output toc file. Use - for stdout. Defaults to stdout.",
-    )
-    read_parser.set_defaults(handler=lambda args: handle_read(args))
-
-
-
-
-def main(argv: list[str]) -> None:
-    parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        action="count",
-        default=0,
-        help="Increase verbosity level (can be repeated: -vv for extra verbose)",
-    )
-
-    subparsers = parser.add_subparsers(dest="command", required=True)
-    add_write_subparser(subparsers)
-    add_read_subparser(subparsers)
-
-    args = parser.parse_args(argv)
-
-    # Configure logging based on verbosity
+def _configure_logging(verbosity: int) -> None:
     log_level = logging.WARNING
-    if args.verbose == 1:
+    if verbosity == 1:
         log_level = logging.INFO
-    elif args.verbose >= 2:
+    elif verbosity >= 2:
         log_level = logging.DEBUG
     logging.basicConfig(
         level=log_level,
         format="%(levelname)s: %(message)s",
     )
 
+
+app = cyclopts.App(
+    help=__doc__,
+)
+
+
+@app.command
+def write(
+    pdf_file: ExistingPath,
+    toc_file: Annotated[
+        StdioPath,
+        cyclopts.Parameter(name=["-t", "--toc-file"]),
+    ] = StdioPath("-"),
+    output: Annotated[
+        Path | None,
+        cyclopts.Parameter(name=["-o", "--output"]),
+    ] = None,
+    retain_existing: bool = False,
+    verbose: Annotated[
+        int,
+        cyclopts.Parameter(name=["-v", "--verbose"], count=True),
+    ] = 0,
+) -> None:
+    """Write TOC entries into a PDF.
+
+    Parameters
+    ----------
+    pdf_file
+        PDF file to update.
+    toc_file
+        TOC text file path, or "-" for stdin.
+    output
+        Output PDF path. Defaults to <pdf-file>-toc.pdf.
+    retain_existing
+        Keep existing outline items instead of replacing them.
+    verbose
+        Increase log verbosity with -v and -vv.
+    """
+
+    _configure_logging(verbose)
+
+    output_file_path = (
+        pdf_file.with_stem(pdf_file.stem + "-toc") if output is None else output
+    )
+
+    with toc_file.open("r", encoding="utf-8") as toc_in:
+        toc_entries = parse_toc_file(toc_in)
+
+    with output_file_path.open("wb") as output_file, pdf_file.open("rb") as pdf_in:
+        add_pdf_toc(
+            pdf_in,
+            toc_entries,
+            output_file,
+            remove_existing=not retain_existing,
+        )
+    logger.info(f"Successfully created PDF with TOC: {output_file_path}")
+
+@app.command
+def clear(
+    pdf_file: ExistingPath,
+    output: Annotated[
+        Path,
+        cyclopts.Parameter(name=["-o", "--output"]),
+    ],
+    verbose: Annotated[
+        int,
+        cyclopts.Parameter(name=["-v", "--verbose"], count=True),
+    ] = 0,
+) -> None:
+    """Clear TOC entries from a PDF.
+
+    Parameters
+    ----------
+    pdf_file
+        PDF file to update.
+    output
+        Output PDF path.
+    verbose
+        Increase log verbosity with -v and -vv.
+    """
+
+    _configure_logging(verbose)
+
+    output_file_path = output
+    
+    with output_file_path.open("wb") as output_file, pdf_file.open("rb") as pdf_in:
+        add_pdf_toc(
+            pdf_in,
+            None,
+            output_file,
+            remove_existing=True,
+        )
+    logger.info(f"Successfully cleared PDF TOC: {output_file_path}")
+
+@app.command
+def read(
+    pdf_file: ExistingPath,
+    output: Annotated[
+        StdioPath,
+        cyclopts.Parameter(name=["-o", "--output"]),
+    ] = StdioPath("-"),
+    verbose: Annotated[
+        int,
+        cyclopts.Parameter(name=["-v", "--verbose"], count=True),
+    ] = 0,
+) -> None:
+    """Read TOC entries from a PDF.
+
+    Parameters
+    ----------
+    pdf_file
+        PDF file to inspect.
+    output
+        Output TOC text file path, or "-" for stdout.
+    verbose
+        Increase log verbosity with -v and -vv.
+    """
+
+    _configure_logging(verbose)
+
+    with pdf_file.open("rb") as pdf_in, output.open("w", encoding="utf-8") as out:
+        pdf_reader = pypdf.PdfReader(pdf_in)
+        read_toc(pdf_reader, out)
+
+
+def main(argv: list[str] | None = None) -> None:
     try:
-        args.handler(args)
+        app(argv)
     except CliError as exc:
         logger.error(str(exc))
         raise SystemExit(1) from exc
