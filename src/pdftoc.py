@@ -6,9 +6,9 @@
 # ]
 # ///
 
-r"""pdftoc: Manipulate outline/table of contents (TOC) entries in PDF document
+r"""pdftoc: Manipulate outline/table of contents (TOC) entries in PDF documents
 
-To write an outline/TOC to a PDF document `myfile.pdf`, create a text file `myfile-toc.txt` with the desired entries:
+pdftoc can read and write PDF outlines/table of contents (TOC) in a simple text format with hierarchy defined by indentation:
 
 ```
 1 Introduction . 6
@@ -17,46 +17,9 @@ To write an outline/TOC to a PDF document `myfile.pdf`, create a text file `myfi
     2.2 Our Approach . 15
 3 Conclusion . 18
 ```
-Then run `pdftoc` as follows to create a new PDF `myfile-toc.pdf` with the outline entries:
 
-```bash
-> pdftoc write myfile.pdf
-```
-
-To read out an existing outline, run `pdftoc read myfile-toc.pdf`.
-
-Run `pdftoc write --help` or `pdftoc read --help` for more options.
-
-TOC file format
----------------
-By default, the lines of the TOC file (`myfile-toc.txt` above) are expected to have format:
-
-    {indent with four spaces per level}{Entry title}{any number of spaces or dots}{page number}
-
-Indent is computed relative to first line, so the first line can have any amount of leading spaces.
-As detailed below, the page number can be adjusted by adding an offset (default 0) to get the PDF page number.
-To work with files in differet formats, the parser can be configured by adding a TOML header to the TOC file.
-The header is delimited by lines containing `---` and can specify the following fields:
-
-- `offset`: Number to add to the listed page number to get the PDF page number. Default is 0.
-- `indent_size`: Number of spaces that correspond to one level of indentation. Default is 4.
-- `parser_regex`: Regular expression with named groups `indent`, `title`, and `page_number` to parse each line.
-
-
- Example (this parses to same toc entries as the default format example above):
-```
----
-offset=5
-indent_size=2
-parser_regex="^\\s*(?P<page_number>\\d+)(?P<indent>\\s+)(?P<title>.*)$"
----
-  1   1 Introduction
-  4   2 Background
-  8     2.1 Previous Work
- 10     2.2 Our Approach
- 13   3 Conclusion
-```
-
+The default format looks as above. 
+See help for the `write` subcommand for details on the expected format and how to customize it.
 """
 
 from __future__ import annotations
@@ -65,7 +28,6 @@ import itertools
 import logging
 from pathlib import Path
 import re
-import sys
 import tomllib
 from typing import Annotated
 from typing import NamedTuple
@@ -78,10 +40,6 @@ import pypdf
 from pypdf.generic import Destination
 
 logger = logging.getLogger(__name__)
-
-
-class CliError(Exception):
-    """Raised for expected CLI failures that should exit with code 1."""
 
 
 class TocEntry(NamedTuple):
@@ -292,12 +250,55 @@ def write(
         cyclopts.Parameter(name=["-o", "--output"]),
     ] = None,
     retain_existing: bool = False,
-    verbose: Annotated[
-        int,
-        cyclopts.Parameter(name=["-v", "--verbose"], count=True),
-    ] = 0,
 ) -> None:
-    """Write TOC entries into a PDF.
+    """Write outline/table of contents (TOC) to a PDF.
+
+    The outline must be provided in a text file with one entry per line.
+    By default, the lines are expected to have format:
+
+        {indent with four spaces per level}{Entry title}{any number of spaces or dots}{page number}
+
+    Indent is computed relative to first line, so the first line can have any amount of leading spaces.
+    As detailed below, the page number can be adjusted by adding an offset (default 0) to get the PDF page number.
+    As an example, the following TOC text would create 5 entries:
+
+        ```
+    1 Introduction . 6
+    2 Background . 10
+        2.1 Previous Work . 13
+        2.2 Our Approach . 15
+    3 Conclusion . 18
+    ```
+
+    To apply this TOC to `myfile.pdf`, create a text file `myfile-toc.txt` with the above content and run:
+
+        > pdftoc write myfile.pdf --toc-file myfile-toc.txt
+
+    This will create a new PDF `myfile-toc.pdf` with the outline entries.
+
+
+    ## Options for customizing TOC file format
+
+    The expected format of the TOC file can be customized by adding a TOML header to the file.
+    The header is delimited by lines containing `---` and can specify the following fields:
+
+    - `offset`: Number to add to the listed page number to get the PDF page number. Default is 0.
+    - `indent_size`: Number of spaces that correspond to one level of indentation. Default is 4.
+    - `parser_regex`: Regular expression with named groups `indent`, `title`, and `page_number` to parse each line.
+
+    The following example parses to the same outline as the example above in default format.
+    ```
+    ---
+    offset=5
+    indent_size=2
+    parser_regex="^\\s*(?P<page_number>\\d+)(?P<indent>\\s+)(?P<title>.*)$"
+    ---
+     1   1 Introduction
+     4   2 Background
+     8     2.1 Previous Work
+    10     2.2 Our Approach
+    13   3 Conclusion
+    ```
 
     Parameters
     ----------
@@ -309,11 +310,7 @@ def write(
         Output PDF path. Defaults to <pdf-file>-toc.pdf.
     retain_existing
         Keep existing outline items instead of replacing them.
-    verbose
-        Increase log verbosity with -v and -vv.
     """
-
-    _configure_logging(verbose)
 
     output_file_path = (
         pdf_file.with_stem(pdf_file.stem + "-toc") if output is None else output
@@ -331,6 +328,7 @@ def write(
         )
     logger.info(f"Successfully created PDF with TOC: {output_file_path}")
 
+
 @app.command
 def clear(
     pdf_file: ExistingPath,
@@ -338,10 +336,6 @@ def clear(
         Path,
         cyclopts.Parameter(name=["-o", "--output"]),
     ],
-    verbose: Annotated[
-        int,
-        cyclopts.Parameter(name=["-v", "--verbose"], count=True),
-    ] = 0,
 ) -> None:
     """Clear TOC entries from a PDF.
 
@@ -351,14 +345,10 @@ def clear(
         PDF file to update.
     output
         Output PDF path.
-    verbose
-        Increase log verbosity with -v and -vv.
     """
 
-    _configure_logging(verbose)
-
     output_file_path = output
-    
+
     with output_file_path.open("wb") as output_file, pdf_file.open("rb") as pdf_in:
         add_pdf_toc(
             pdf_in,
@@ -368,6 +358,7 @@ def clear(
         )
     logger.info(f"Successfully cleared PDF TOC: {output_file_path}")
 
+
 @app.command
 def read(
     pdf_file: ExistingPath,
@@ -375,10 +366,6 @@ def read(
         StdioPath,
         cyclopts.Parameter(name=["-o", "--output"]),
     ] = StdioPath("-"),
-    verbose: Annotated[
-        int,
-        cyclopts.Parameter(name=["-v", "--verbose"], count=True),
-    ] = 0,
 ) -> None:
     """Read TOC entries from a PDF.
 
@@ -388,24 +375,33 @@ def read(
         PDF file to inspect.
     output
         Output TOC text file path, or "-" for stdout.
-    verbose
-        Increase log verbosity with -v and -vv.
     """
-
-    _configure_logging(verbose)
 
     with pdf_file.open("rb") as pdf_in, output.open("w", encoding="utf-8") as out:
         pdf_reader = pypdf.PdfReader(pdf_in)
         read_toc(pdf_reader, out)
 
 
-def main(argv: list[str] | None = None) -> None:
-    try:
-        app(argv)
-    except CliError as exc:
-        logger.error(str(exc))
-        raise SystemExit(1) from exc
+@app.meta.default
+def _launcher(
+    *tokens: Annotated[
+        str,
+        cyclopts.Parameter(show=False, allow_leading_hyphen=True),
+    ],
+    verbose: Annotated[
+        int,
+        cyclopts.Parameter(
+            name=["-v", "--verbose"],
+            count=True,
+            help="Increase verbosity level (can be used multiple times)",
+        ),
+    ] = 0,
+) -> typing.Any:
+    """Global launcher for shared CLI setup such as verbosity."""
+
+    _configure_logging(verbose)
+    app(tokens)
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    app.meta()

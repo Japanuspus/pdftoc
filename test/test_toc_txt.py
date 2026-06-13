@@ -43,4 +43,3 @@ def test_parse_toc_file(sample):
     ]
     entries = pdftoc.parse_toc_file(toc_text)
     assert entries == expected_entries, f"Expected {expected_entries}, got {entries}"
-
