@@ -30,3 +30,7 @@ The single file in `src` works as uv standalone script, alternatively use `uvx`,
 ``` bash
 uvx --from git+https://github.com/Japanuspus/pdftoc pdftoc -h
 ```
+
+``` bash
+uv tool install  --from git+https://github.com/Japanuspus/pdftoc pdftoc
+```
