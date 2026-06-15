@@ -25,8 +25,8 @@ See `pdftoc --help` for details on functionality.
 
 ## Install
 
-The single file in `src` works as uv standalone script, alternatively use `uv tool install` or similar
+The single file in `src` works as uv standalone script, alternatively use `uvx`, `uv tool install` or similar
 
 ``` bash
-uv tool install ....
+uvx --from git+https://github.com/Japanuspus/pdftoc pdftoc -h
 ```

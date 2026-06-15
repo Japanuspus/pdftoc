@@ -399,5 +399,9 @@ def _global_callback(
     _configure_logging(verbose)
 
 
-if __name__ == "__main__":
+def main() -> None:
     app()
+
+
+if __name__ == "__main__":
+    main()

@@ -9,6 +9,9 @@ dependencies = [
     "typer>=0.26.7",
 ]
 
+[project.scripts]
+pdftoc = "pdftoc:main"
+
 [build-system]
 requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
