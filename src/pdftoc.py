@@ -1,8 +1,8 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # dependencies = [
-#   "cyclopts",
-#   "pypdf",
+#   "py",
+#   "typer",
 # ]
 # ///
 
@@ -33,9 +33,7 @@ from typing import Annotated
 from typing import NamedTuple
 import typing
 
-import cyclopts
-from cyclopts.types import ExistingPath
-from cyclopts.types import StdioPath
+import typer
 import pypdf
 from pypdf.generic import Destination
 
@@ -157,12 +155,14 @@ def add_pdf_toc(
     writer.page_mode = "/UseOutlines"
 
     if remove_existing:
+        logger.debug("Removing existing outline items from PDF")
         writer.get_outline_root().empty_tree()
 
     # Track outline items at each level to set correct parent relationships
     outline_stack = {}
 
-    logger.debug(f"Processing {len(toc_entries)} TOC entries:")
+    if toc_entries:
+        logger.debug(f"Processing {len(toc_entries)} TOC entries:")
     for pdf_page_number, header_level, title in toc_entries:
         # Adjust for 0-based indexing in pypdf
         page_idx = pdf_page_number - 1
@@ -187,6 +187,7 @@ def add_pdf_toc(
         outline_stack[header_level] = outline_item
 
         # Remove items at deeper levels since we're now at a shallower level
+        # Some day: just track highest valid level and leave stale entries in stack instead of deleting from stack
         for level in list(outline_stack.keys()):
             if level > header_level:
                 del outline_stack[level]
@@ -221,37 +222,40 @@ def read_toc(pdf_reader: pypdf.PdfReader, out: typing.TextIO) -> None:
     _read_toc(pdf_reader, pdf_reader.outline, out)
 
 
-def _configure_logging(verbosity: int) -> None:
-    log_level = logging.WARNING
-    if verbosity == 1:
-        log_level = logging.INFO
-    elif verbosity >= 2:
-        log_level = logging.DEBUG
-    logging.basicConfig(
-        level=log_level,
-        format="%(levelname)s: %(message)s",
-    )
+app = typer.Typer(help=__doc__)
 
 
-app = cyclopts.App(
-    help=__doc__,
-)
-
-
-@app.command
+@app.command()
 def write(
-    pdf_file: ExistingPath,
+    pdf_file: Annotated[
+        Path,
+        typer.Argument(help="PDF file to update.", exists=True),
+    ],
     toc_file: Annotated[
-        StdioPath,
-        cyclopts.Parameter(name=["-t", "--toc-file"]),
-    ] = StdioPath("-"),
+        typer.FileText,
+        typer.Option(
+            "--toc-file",
+            "-t",
+            help="TOC text file path, or '-' for stdin.",
+        ),
+    ],
     output: Annotated[
         Path | None,
-        cyclopts.Parameter(name=["-o", "--output"]),
+        typer.Option(
+            "--output",
+            "-o",
+            help="Output PDF path. Defaults to <pdf-file>-toc.pdf.",
+        ),
     ] = None,
-    retain_existing: bool = False,
+    retain_existing: Annotated[
+        bool,
+        typer.Option(
+            "--retain-existing",
+            help="Keep existing outline items instead of replacing them.",
+        ),
+    ] = False,
 ) -> None:
-    """Write outline/table of contents (TOC) to a PDF.
+    r"""Write outline/table of contents (TOC) to a PDF.
 
     The outline must be provided in a text file with one entry per line.
     By default, the lines are expected to have format:
@@ -262,7 +266,7 @@ def write(
     As detailed below, the page number can be adjusted by adding an offset (default 0) to get the PDF page number.
     As an example, the following TOC text would create 5 entries:
 
-        ```
+    ```
     1 Introduction . 6
     2 Background . 10
         2.1 Previous Work . 13
@@ -299,25 +303,12 @@ def write(
     10     2.2 Our Approach
     13   3 Conclusion
     ```
-
-    Parameters
-    ----------
-    pdf_file
-        PDF file to update.
-    toc_file
-        TOC text file path, or "-" for stdin.
-    output
-        Output PDF path. Defaults to <pdf-file>-toc.pdf.
-    retain_existing
-        Keep existing outline items instead of replacing them.
     """
-
     output_file_path = (
         pdf_file.with_stem(pdf_file.stem + "-toc") if output is None else output
     )
 
-    with toc_file.open("r", encoding="utf-8") as toc_in:
-        toc_entries = parse_toc_file(toc_in)
+    toc_entries = parse_toc_file(toc_file)
 
     with output_file_path.open("wb") as output_file, pdf_file.open("rb") as pdf_in:
         add_pdf_toc(
@@ -329,79 +320,84 @@ def write(
     logger.info(f"Successfully created PDF with TOC: {output_file_path}")
 
 
-@app.command
+
+@app.command()
 def clear(
-    pdf_file: ExistingPath,
+    pdf_file: Annotated[
+        Path,
+        typer.Argument(help="PDF file to update.", exists=True),
+    ],
     output: Annotated[
         Path,
-        cyclopts.Parameter(name=["-o", "--output"]),
+        typer.Option(
+            "--output",
+            "-o",
+            help="Output PDF path.",
+        ),
     ],
 ) -> None:
-    """Clear TOC entries from a PDF.
-
-    Parameters
-    ----------
-    pdf_file
-        PDF file to update.
-    output
-        Output PDF path.
-    """
-
-    output_file_path = output
-
-    with output_file_path.open("wb") as output_file, pdf_file.open("rb") as pdf_in:
+    """Clear outline/table of contents (TOC) from a PDF."""
+    
+    with output.open("wb") as output_file, pdf_file.open("rb") as pdf_in:
         add_pdf_toc(
             pdf_in,
-            None,
+            [],  # No TOC entries to add
             output_file,
             remove_existing=True,
         )
-    logger.info(f"Successfully cleared PDF TOC: {output_file_path}")
+    logger.info(f"Successfully cleared PDF TOC: {output}")
 
 
-@app.command
+
+@app.command()
 def read(
-    pdf_file: ExistingPath,
-    output: Annotated[
-        StdioPath,
-        cyclopts.Parameter(name=["-o", "--output"]),
-    ] = StdioPath("-"),
-) -> None:
-    """Read TOC entries from a PDF.
-
-    Parameters
-    ----------
-    pdf_file
-        PDF file to inspect.
-    output
-        Output TOC text file path, or "-" for stdout.
-    """
-
-    with pdf_file.open("rb") as pdf_in, output.open("w", encoding="utf-8") as out:
-        pdf_reader = pypdf.PdfReader(pdf_in)
-        read_toc(pdf_reader, out)
-
-
-@app.meta.default
-def _launcher(
-    *tokens: Annotated[
-        str,
-        cyclopts.Parameter(show=False, allow_leading_hyphen=True),
+    pdf_file: Annotated[
+        Path,
+        typer.Argument(help="PDF file to inspect.", exists=True),
     ],
+    output: Annotated[
+        typer.FileTextWrite,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Output TOC text file path, or '-' for stdout. Default is stdout.",
+        ),
+    ] = "-",
+) -> None:
+    """Read outline/table of contents (TOC) entries from a PDF."""
+    
+    with pdf_file.open("rb") as pdf_in:
+        pdf_reader = pypdf.PdfReader(pdf_in)
+        read_toc(pdf_reader, output)
+
+
+def _configure_logging(verbosity: int) -> None:
+    log_level = logging.WARNING
+    if verbosity == 1:
+        log_level = logging.INFO
+    elif verbosity >= 2:
+        log_level = logging.DEBUG
+    logging.basicConfig(
+        level=log_level,
+        format="%(levelname)s: %(message)s",
+    )
+
+
+@app.callback()
+def _global_callback(
     verbose: Annotated[
         int,
-        cyclopts.Parameter(
-            name=["-v", "--verbose"],
+        typer.Option(
+            "--verbose",
+            "-v",
             count=True,
             help="Increase verbosity level (can be used multiple times)",
         ),
     ] = 0,
-) -> typing.Any:
-    """Global launcher for shared CLI setup such as verbosity."""
-
+) -> None:
+    """Configure global logging before running commands."""    
     _configure_logging(verbose)
-    app(tokens)
 
 
 if __name__ == "__main__":
-    app.meta()
+    app()

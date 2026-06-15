@@ -5,8 +5,8 @@ description = "A tool for manipulating outlines/table of content (TOC) in pdf fi
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "cyclopts>=4.18.0",
     "pypdf>=6.13.2",
+    "typer>=0.26.7",
 ]
 
 [build-system]
